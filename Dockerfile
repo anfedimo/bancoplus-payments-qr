@@ -6,7 +6,7 @@ COPY src ./src
 RUN mvn -q -B package -DskipTests
 
 # Runtime mínimo: Alpine sin herramientas adicionales de la imagen base Ubuntu
-FROM eclipse-temurin:21-jre-alpine
+FROM eclipse-temurin:25-jre-alpine
 WORKDIR /app
 COPY --from=build /src/target/payments-qr-1.0.0.jar app.jar
 RUN adduser -D -u 10001 app
