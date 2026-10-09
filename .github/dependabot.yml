@@ -1,0 +1,23 @@
+# Actualización automática por PR: Trivy (HIGH/CRITICAL corregibles) y el contrato SLO validan
+# cada propuesta antes del merge; la imagen resultante se promueve por GitOps.
+version: 2
+updates:
+  - package-ecosystem: maven
+    directory: "/"
+    schedule: { interval: weekly, day: monday }
+    groups:
+      spring: { patterns: ["org.springframework*"] }
+      runtime: { patterns: ["*"], exclude-patterns: ["org.springframework*"] }
+    commit-message: { prefix: ":wrench:" }
+
+  - package-ecosystem: docker
+    directory: "/"
+    schedule: { interval: weekly, day: monday }
+    commit-message: { prefix: ":whale:" }
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule: { interval: weekly, day: monday }
+    groups:
+      actions: { patterns: ["*"] }
+    commit-message: { prefix: ":octocat:" }
