@@ -1,0 +1,82 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: bancoplus/payments-qr
+  IMAGE: payments-qr:${{ github.sha }}
+
+jobs:
+  slo-contract:
+    name: Contrato SLO
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: pip install -q pyyaml && python scripts/validate_slo.py slo.yaml
+
+  build:
+    name: Build · Trivy · Push a ECR
+    needs: slo-contract
+    # Runner ARM nativo: misma arquitectura que los nodos Graviton, sin emulación
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      id-token: write # token OIDC para asumir el rol de AWS (sin llaves de larga duración)
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build (linux/arm64)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/arm64
+          load: true
+          tags: ${{ env.IMAGE }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trivy · vulnerabilidades HIGH/CRITICAL corregibles (bloqueante)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Credenciales AWS vía OIDC
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-${{ github.run_id }}
+
+      - name: Login a ECR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Push (tag inmutable = commit SHA)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          target="${{ steps.ecr.outputs.registry }}/${ECR_REPOSITORY}:${GITHUB_SHA}"
+          docker tag "$IMAGE" "$target"
+          docker push "$target"
+          {
+            echo "### Imagen publicada"
+            echo "\`$target\`"
+            echo
+            echo "Promoción: actualizar \`newTag\` en bancoplus-platform-gitops/workloads/payments-qr/overlays/eks-ephemeral/kustomization.yaml"
+          } >> "$GITHUB_STEP_SUMMARY"
